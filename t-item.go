@@ -151,7 +151,9 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 		LogInDebugMode("Item is: ", i)
 		go i.Save()
 	} else {
+		// Invalid page, lets delete item if it is invalid
 		fmt.Println("No item data for this page")
+
 		// Delete the item from SQL
 		fmt.Println("DELETING ITEM: ", i.name)
 		deleteQuery := "DELETE FROM items WHERE name = ? OR displayName = ?"
@@ -159,6 +161,57 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 		if rows != nil {
 			fmt.Println("Deleted item successfully")
 			DB.CloseRows(rows)
+		}
+
+		// Check if its a spell page
+		reg := regexp.MustCompile("(?i)(magician|necromancer|paladin|warrior|druid|enchanter|cleric|shadowknight|monk|shaman|wizard|bard|rogue|ranger)")
+		classMatches := reg.FindStringSubmatch(body)
+		reg = regexp.MustCompile("(?i)(level[ \n]+[0-9]+)") // account for any poor formatting
+		levelMatches := reg.FindStringSubmatch(body)
+
+		if len(classMatches) > 0 && len(levelMatches) > 0 {
+			srcMatches := regexp.MustCompile("(?i)(/images/)((.*?)+ ?\")").FindStringSubmatch(body)
+			if len(srcMatches) > 0 {
+				i.imageSrc = strings.TrimSpace(srcMatches[0])
+			}
+
+			class := classMatches[0]
+			level := strings.TrimSpace(regexp.MustCompile("[0-9]+").FindStringSubmatch(levelMatches[0])[0])
+
+			var stats []Statistic
+			var stat Statistic
+			stat.code = "CLASS"
+			stat.effect = class
+
+			stats = append(stats, stat)
+
+			stat.code = "LEVEL"
+			lvl, err := strconv.ParseFloat(level, 64)
+
+			if err == nil {
+				stat.value = sql.NullFloat64{Float64: float64(lvl), Valid: true}
+				stat.effect = ""
+
+				stats = append(stats, stat)
+
+				i.name = "Spell: " + i.name
+				i.statistics = stats
+
+				fmt.Println("Saving item: ", i)
+
+				query := "INSERT IGNORE INTO items (name, displayName, imageSrc) VALUES (?, ?, ?)"
+				id, err := DB.Insert(query, TitleCase(i.name, false), TitleCase(i.displayName, true), i.imageSrc)
+				if err != nil {
+					fmt.Println(err.Error())
+				} else if id == 0 {
+					fmt.Println("Item already exists")
+				} else if id > 0 {
+					fmt.Println("Successfully created item: " + i.name + " with id: ", id)
+					i.saveStats(id)
+				}
+			} else {
+				fmt.Println("Conversion error: ", err.Error())
+			}
 		}
 	}
 }
