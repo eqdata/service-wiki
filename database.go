@@ -22,6 +22,7 @@ func (d *Database) Open() bool {
 		fmt.Println(err.Error())
 	}
 	d.conn = db
+	d.conn.SetMaxOpenConns(MAX_CONNECTIONS)
 
 	// Check that we can ping the DB box as the connection is lazy loaded when we fire the query
 	err = d.conn.Ping()
@@ -68,7 +69,17 @@ func (d *Database) Query(query string, parameters ...interface{}) (*sql.Rows, er
 }
 
 func (d *Database) Insert(query string, parameters ...interface{}) (int64, error) {
-	res, err := d.conn.Exec(query, parameters...)
+	tx, err := d.conn.Begin()
+	if err != nil {
+		fmt.Println("Error creating transaction: ", err.Error())
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(query)
+	if err != nil {
+		fmt.Println("Error preparing insert query: ", err)
+	}
+
+	res, err := stmt.Exec(parameters...)
 	if err != nil {
 		fmt.Println("Exec err when inserting: ", err.Error())
 	} else {
@@ -77,10 +88,20 @@ func (d *Database) Insert(query string, parameters ...interface{}) (int64, error
 			fmt.Println("Error when fetching last insert id: ", err.Error())
 		} else {
 			LogInDebugMode("returning iD: ", id)
+			err = tx.Commit()
+			if err != nil {
+				panic(err.Error())
+			}
+			stmt.Close()
 			return id, nil
 		}
 	}
 
+	err = tx.Commit()
+	if err != nil {
+		panic(err.Error())
+	}
+	stmt.Close()
 	return -1, err
 }
 
@@ -95,5 +116,11 @@ func (d *Database) Close() {
 		}
 	} else {
 		fmt.Println("DB Connection was already closed")
+	}
+}
+
+func (d *Database) CloseRows(rows *sql.Rows) {
+	if err := rows.Close(); err != nil {
+		fmt.Println("Close error: ", err)
 	}
 }

@@ -91,8 +91,6 @@ func (i *Item) fetchDataFromSQL() bool {
 
 	rows, _ := DB.Query(query, i.name, i.name)
 	if rows != nil {
-		defer rows.Close()
-
 		hasStat := false
 		for rows.Next() {
 			err := rows.Scan(&name, &displayName, &statCode, &statValue)
@@ -106,6 +104,10 @@ func (i *Item) fetchDataFromSQL() bool {
 			}
 			LogInDebugMode("Row is: ", name, displayName, fmt.Sprint(statCode), fmt.Sprint(statValue))
 		}
+		if err := rows.Err(); err != nil {
+			fmt.Println("ROW ERROR: ", err.Error())
+		}
+		DB.CloseRows(rows)
 		return hasStat
 	}
 
@@ -150,6 +152,14 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 		go i.Save()
 	} else {
 		fmt.Println("No item data for this page")
+		// Delete the item from SQL
+		fmt.Println("DELETING ITEM: ", i.name)
+		deleteQuery := "DELETE FROM items WHERE name = ? OR displayName = ?"
+		rows, _ := DB.Query(deleteQuery, i.name, i.name)
+		if rows != nil {
+			fmt.Println("Deleted item successfully")
+			DB.CloseRows(rows)
+		}
 	}
 }
 
@@ -161,7 +171,7 @@ func (i *Item) assignStatistic(part string) {
 	var stat Statistic
 
 	LogInDebugMode("Assigning part: ", part)
-	if stringutil.CaseInsenstiveContains(part, "lore item", "magic item", "temporary") {
+	if stringutil.CaseInsenstiveContains(part, "lore item", "magic item", "temporary", "no drop", "no rent", "no trade") {
 		stat.code = "AFFINITY"
 		stat.effect = strings.ToUpper(part)
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
@@ -233,17 +243,19 @@ func (i *Item) assignStatistic(part string) {
 // Saves the item to our SQL database
 func (i *Item) Save() {
 	query := "UPDATE items SET name = ?, displayName = ?, imageSrc = ? WHERE name = ? AND displayName = ?"
-	_, err := DB.Query(query, i.name, i.displayName, i.imageSrc, i.name, i.displayName)
+	rows, err := DB.Query(query, i.name, i.displayName, i.imageSrc, i.name, i.displayName)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
+	if rows != nil {
+		DB.CloseRows(rows)
+	}
 	query = "SELECT id FROM items WHERE name = ? OR displayName = ?"
-	rows, err := DB.Query(query, i.name, i.name)
+	rows, err = DB.Query(query, i.name, i.name)
 	if err == nil {
 		if rows != nil {
 			var id int64
 
-			defer rows.Close()
 			for rows.Next() {
 				err := rows.Scan(&id)
 				if err != nil {
@@ -253,6 +265,10 @@ func (i *Item) Save() {
 				i.saveStats(id)
 				i.saveEffects(id)
 			}
+			if err = rows.Err(); err != nil {
+				fmt.Println("ROW ERROR: ", err.Error())
+			}
+			DB.CloseRows(rows)
 		}
 	} else {
 		fmt.Println("Failed to insert stats for this item: ", err.Error())
@@ -280,6 +296,10 @@ func (i *Item) saveEffects(id int64) {
 					}
 					LogInDebugMode("Got effect id: ", fmt.Sprint(effectId))
 				}
+				if err := rows.Err(); err != nil {
+					fmt.Println("ROW ERROR: ", err.Error())
+				}
+				DB.CloseRows(rows)
 				if !exists {
 					query := "INSERT IGNORE INTO effects" +
 						"(name, uri)" +
@@ -314,7 +334,7 @@ func (i *Item) saveEffects(id int64) {
 					}
 				}
 
-				rows.Close()
+				DB.CloseRows(rows)
 			} else {
 				fmt.Println("No rows for effect: ", effect.name)
 			}

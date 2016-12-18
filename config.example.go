@@ -22,4 +22,5 @@ const MC_HOST = "";
 const MC_PORT = "";
 
 const CACHE_TIME_IN_SECS = 60
+const MAX_CONNECTIONS = 20
  */
