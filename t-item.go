@@ -40,20 +40,20 @@ type Item struct {
 // Public method to fetch data for this item, in Go public method are
 // capitalised by convention (doesn't actually enforce Public/Private methods in go)
 // this method will call fetchDataFromWiki and fetchDataFromCache where appropriate
-func (i *Item) FetchData() {
+func (i *Item) FetchData(syncSave bool) {
 	fmt.Println("Fetching data for item: ", i.name)
 	i.displayName = TitleCase(i.name, true)
 
 	if(i.fetchDataFromSQL()) {
 		fmt.Println("Exists in SQL")
 	} else {
-		i.fetchDataFromWiki()
+		i.fetchDataFromWiki(syncSave)
 		fmt.Println("Fetched from Wiki")
 	}
 }
 
 // Data didn't exist on our server, so we hit the wiki here
-func (i *Item) fetchDataFromWiki() {
+func (i *Item) fetchDataFromWiki(syncSave bool) {
 
 	uriString := TitleCase(i.name, true)
 
@@ -68,7 +68,7 @@ func (i *Item) fetchDataFromWiki() {
 	if(err != nil) {
 		fmt.Println("ERROR EXTRACTING BODY FROM RESPONSE: ", err)
 	}
-	i.extractItemDataFromHttpResponse(string(body))
+	i.extractItemDataFromHttpResponse(string(body), syncSave)
 }
 
 // Check our cache first to see if the item exists - this will eventually return something
@@ -116,7 +116,7 @@ func (i *Item) fetchDataFromSQL() bool {
 }
 
 // Extracts data from body
-func (i *Item) extractItemDataFromHttpResponse(body string) {
+func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 	itemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itemData")
 	endOfItemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itembotbg")
 
@@ -149,7 +149,11 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 		}
 
 		LogInDebugMode("Item is: ", i)
-		go i.Save()
+		if syncSave {
+			i.Save()
+		} else {
+			go i.Save()
+		}
 	} else {
 		// Invalid page, lets delete item if it is invalid
 		fmt.Println("No item data for this page")
@@ -322,6 +326,18 @@ func (i *Item) Save() {
 				fmt.Println("ROW ERROR: ", err.Error())
 			}
 			DB.CloseRows(rows)
+
+			if id == 0 {
+				fmt.Println("We never found anything")
+				query := "INSERT INTO items (name, displayName, imageSrc) VALUES (?, ?, ?)"
+				id, err := DB.Insert(query, i.name, i.displayName, i.imageSrc)
+				if err == nil && id > 0 {
+					fmt.Println("Inserted with id: ", fmt.Sprint(id))
+					LogInDebugMode("Got id: ", fmt.Sprint(id))
+					i.saveStats(id)
+					i.saveEffects(id)
+				}
+			}
 		}
 	} else {
 		fmt.Println("Failed to insert stats for this item: ", err.Error())

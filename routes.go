@@ -19,4 +19,10 @@ var routes = Routes {
 		"/items",
 		IC.store,
 	},
+	Route {
+		"Create Item",
+		"POST",
+		"/items/{item_name}",
+		IC.fetchOrStore,
+	},
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"strconv"
+	"github.com/gorilla/mux"
 )
 
 type ItemController struct {
@@ -34,6 +35,28 @@ func (c *ItemController) store(w http.ResponseWriter, r *http.Request) {
 	go c.parse(&items)
 }
 
+func (c *ItemController) fetchOrStore(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	itemName := TitleCase(mux.Vars(r)["item_name"], true)
+
+	item := Item {
+		name: strings.Replace(itemName, "_", " ", -1),
+		displayName: TitleCase(itemName, true),
+	}
+
+	item.FetchData(true)
+
+	if item.imageSrc != "" || len(item.effects) > 0 || len(item.statistics) > 0 {
+		fmt.Println("Item is now: ", item)
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(item)
+	} else {
+		fmt.Println("Couldn't find item: ", item)
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
 //
 func (c *ItemController) parse(rawItems *[]string) {
 
@@ -45,6 +68,6 @@ func (c *ItemController) parse(rawItems *[]string) {
 			name: itemName,
 			displayName: TitleCase(itemName, true),
 		}
-		go item.FetchData()
+		go item.FetchData(false)
 	}
 }
