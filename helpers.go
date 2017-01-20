@@ -27,6 +27,7 @@ func TitleCase(name string, urlFriendly bool) string {
 		}
 	}
 	uriString = strings.Replace(uriString, "'S", "'s", -1)
+	uriString = strings.Replace(uriString, "`S", "`s", -1)
 	uriString = uriString[0:len(uriString)-1]
 	return uriString
 }
