@@ -68,7 +68,10 @@ func (i *Item) fetchDataFromWiki(syncSave bool) {
 	if(err != nil) {
 		fmt.Println("ERROR EXTRACTING BODY FROM RESPONSE: ", err)
 	}
-	i.extractItemDataFromHttpResponse(string(body), syncSave)
+
+	if !stringutil.CaseInsenstiveContains(i.name, "spell:") && !stringutil.CaseInsenstiveContains(i.displayName, "spell:") {
+		i.extractItemDataFromHttpResponse(string(body), syncSave)
+	}
 }
 
 // Check our cache first to see if the item exists - this will eventually return something
