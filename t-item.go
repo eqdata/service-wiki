@@ -231,7 +231,7 @@ func (i *Item) assignStatistic(part string) {
 	var stat Statistic
 
 	LogInDebugMode("Assigning part: ", part)
-	if stringutil.CaseInsenstiveContains(part, "lore item", "magic item", "temporary", "no drop", "no rent", "no trade") {
+	if stringutil.CaseInsenstiveContains(part, "nodrop", "quest item", "lore item", "magic item", "temporary", "no drop", "no rent", "no trade", "norent", "notrade", "expendable") {
 		stat.code = "AFFINITY"
 		stat.effect = strings.ToUpper(part)
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
@@ -240,7 +240,7 @@ func (i *Item) assignStatistic(part string) {
 		stat.code = strings.ToUpper(strings.TrimSpace(parts[0]))
 		stat.effect = strings.ToUpper(strings.TrimSpace(parts[1]))
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
-	} else if stringutil.CaseInsenstiveContains(part, "sv fire:", "sv cold:", "sv poison:", "sv magic:", "sv disease:", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:") {
+	} else if stringutil.CaseInsenstiveContains(part, "sv fire:", "sv cold:", "sv poison:", "sv magic:", "sv disease:", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:", "haste:", "instrument:", "instruments:", "range:", "charges:") {
 		parts := strings.Split(part, ":")
 
 		isPositiveNumber := true
@@ -263,7 +263,7 @@ func (i *Item) assignStatistic(part string) {
 				stat.value = sql.NullFloat64{Float64:(val * -1.0), Valid: true}
 			}
 		}
-	} else if stringutil.CaseInsenstiveContains(part, "<a href=", "effect:") {
+	} else if stringutil.CaseInsenstiveContains(part, "<a href=", "effect:", "casting time:", "combat", "at level") {
 		var e Effect
 
 		// Remove the effect: tag if it exists
