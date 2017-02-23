@@ -81,6 +81,7 @@ func (d *Database) Insert(query string, parameters ...interface{}) (int64, error
 
 	res, err := stmt.Exec(parameters...)
 	if err != nil {
+		fmt.Println("Query failed: " + query + ", Parameters: ", fmt.Sprint(parameters))
 		fmt.Println("Exec err when inserting: ", err.Error())
 	} else {
 		id, err := res.LastInsertId()

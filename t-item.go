@@ -41,20 +41,19 @@ type Item struct {
 // Public method to fetch data for this item, in Go public method are
 // capitalised by convention (doesn't actually enforce Public/Private methods in go)
 // this method will call fetchDataFromWiki and fetchDataFromCache where appropriate
-func (i *Item) FetchData(syncSave bool) {
+func (i *Item) FetchData() {
 	fmt.Println("Fetching data for item: ", i.name)
 	i.displayName = TitleCase(i.name, true)
 
 	if(i.fetchDataFromSQL()) {
-		fmt.Println("Exists in SQL")
+		//fmt.Println("Exists in SQL")
 	} else {
-		i.fetchDataFromWiki(syncSave)
-		fmt.Println("Fetched from Wiki")
+		i.fetchDataFromWiki()
 	}
 }
 
 // Data didn't exist on our server, so we hit the wiki here
-func (i *Item) fetchDataFromWiki(syncSave bool) {
+func (i *Item) fetchDataFromWiki() {
 
 	uriString := TitleCase(i.name, true)
 
@@ -71,7 +70,7 @@ func (i *Item) fetchDataFromWiki(syncSave bool) {
 	}
 
 	if !stringutil.CaseInsenstiveContains(i.name, "spell:") && !stringutil.CaseInsenstiveContains(i.displayName, "spell:") {
-		i.extractItemDataFromHttpResponse(string(body), syncSave)
+		i.extractItemDataFromHttpResponse(string(body))
 	}
 }
 
@@ -103,7 +102,7 @@ func (i *Item) fetchDataFromSQL() bool {
 				fmt.Println("Scan error: ", err)
 			}
 			if statCode == nil && statValue == nil {
-				fmt.Println("No stat exists for: ", displayName)
+				fmt.Println("No stats exists for: ", displayName)
 			} else {
 				hasStat = true
 			}
@@ -124,7 +123,7 @@ func (i *Item) fetchDataFromSQL() bool {
 }
 
 // Extracts data from body
-func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
+func (i *Item) extractItemDataFromHttpResponse(body string) {
 	itemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itemData")
 	endOfItemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itembotbg")
 
@@ -146,9 +145,9 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 
 		for _, part := range upperParts {
 			part = strings.TrimSpace(part)
+			if part == "" { continue }
 
-			fmt.Println("Matching against: ", part)
-			reg := regexp.MustCompile(`([A-Za-z:]+[ ]{0,}([+|-]?[ ]{0,}[0-9.]+|[A-Z ]+))`)
+			reg := regexp.MustCompile(`([A-Za-z]+ ?)+:? ?(([0-9A-Za-z.+-]+ ?)+)`)
 			matches := reg.FindAllStringSubmatch(part, -1)
 			if len(matches) > 0 && !stringutil.CaseInsenstiveContains(part, "effect:") {
 				for _, match := range matches {
@@ -196,8 +195,6 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 				i.name = "Spell: " + i.name
 				i.statistics = stats
 
-				fmt.Println("Saving item: ", i)
-
 				query := "SELECT id FROM items WHERE displayName = ? OR name = ?"
 				rows, _ := DB.Query(query, i.name, i.name)
 				if rows != nil {
@@ -219,6 +216,8 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 					if exists && spellId > 0 {
 						i.saveStats(spellId)
 					}
+				} else {
+					DB.CloseRows(rows)
 				}
 			} else {
 				fmt.Println("Conversion error: ", err.Error())
@@ -248,7 +247,7 @@ func (i *Item) assignStatistic(part string) {
 		stat.code = strings.ToUpper(strings.TrimSpace(parts[0]))
 		stat.effect = strings.ToUpper(strings.TrimSpace(parts[1]))
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
-	} else if stringutil.CaseInsenstiveContains(part, "sv fire:", "sv cold:", "sv poison:", "sv magic:", "sv disease:", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:", "haste:", "instrument:", "instruments:", "range:", "charges:", "weight reduction:", "capacity:") {
+	} else if stringutil.CaseInsenstiveContains(part, "sv fire", "sv cold", "sv poison", "sv magic", "sv disease", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:", "haste:", "instrument:", "instruments:", "range:", "charges:", "weight reduction:", "capacity:") {
 		parts := strings.Split(part, ":")
 
 		isPositiveNumber := true
@@ -270,6 +269,7 @@ func (i *Item) assignStatistic(part string) {
 		} else {
 			stat.value = sql.NullFloat64{Float64:val, Valid: true}
 			if !isPositiveNumber {
+				fmt.Println("It wasn't a pos number, setting to: ", fmt.Sprint(val * -1.0))
 				stat.value = sql.NullFloat64{Float64:(val * -1.0), Valid: true}
 			}
 		}
@@ -312,15 +312,20 @@ func (i *Item) assignStatistic(part string) {
 
 func (i *Item) Save() {
 	query := "UPDATE items SET imageSrc = ? WHERE name = ? OR displayName = ?"
-	_, err := DB.Query(query, i.imageSrc, i.name, i.name)
+	rows, err := DB.Query(query, i.imageSrc, i.name, i.name)
+	DB.CloseRows(rows)
 	if err == nil {
 		i.saveEffects(i.id)
 		i.saveStats(i.id)
+
+		fmt.Println("Saved stats for: " + i.name)
+	} else {
+		fmt.Println(err)
 	}
 }
 
 func (i *Item) saveEffects(id int64) {
-	fmt.Println("Saving effects for item: ", id)
+	//fmt.Println("Saving effects for item: ", id)
 	for _, effect := range i.effects {
 		if effect.name != "" && effect.uri != "" {
 			query := "SELECT id " +
@@ -338,9 +343,10 @@ func (i *Item) saveEffects(id int64) {
 					if err != nil {
 						fmt.Println("Scan error: ", err)
 					}
-					LogInDebugMode("Got effect id: ", fmt.Sprint(effectId))
+					fmt.Println("Got effect id: ", fmt.Sprint(effectId))
 				}
-				if err := rows.Err(); err != nil {
+				err := rows.Err();
+				if err != nil {
 					fmt.Println("ROW ERROR: ", err.Error())
 				}
 				DB.CloseRows(rows)
@@ -396,14 +402,15 @@ func (i *Item) saveStats(id int64) {
 		"VALUES "
 
 	for _, statistic := range i.statistics {
+		//fmt.Println("Saving stat: " + fmt.Sprint(statistic.code) + " with value: " + fmt.Sprint(statistic.value))
 		query += "(?, ?, ?, ?),"
 		parameters = append(parameters, id, statistic.code, statistic.value, statistic.effect)
 	}
 	query = query[0:len(query)-1]
 
-	LogInDebugMode("Inserting new statistics with row id: ", int64(id))
+	//fmt.Println("Inserting new statistics with row id: ", int64(id))
 	_, err := DB.Insert(query, parameters...)
 	if err != nil {
-		LogInDebugMode("Darn, we couldn't create this statistic")
+		fmt.Println("Darn, we couldn't create this statistic: ", err)
 	}
 }

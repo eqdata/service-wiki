@@ -32,7 +32,7 @@ func (c *ItemController) store(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go c.parse(&items)
+	c.parse(&items)
 }
 
 func (c *ItemController) fetchOrStore(w http.ResponseWriter, r *http.Request) {
@@ -45,7 +45,7 @@ func (c *ItemController) fetchOrStore(w http.ResponseWriter, r *http.Request) {
 		displayName: TitleCase(itemName, true),
 	}
 
-	item.FetchData(true)
+	item.FetchData()
 
 	if item.imageSrc != "" || len(item.effects) > 0 || len(item.statistics) > 0 {
 		fmt.Println("Item is now: ", item)
@@ -68,6 +68,6 @@ func (c *ItemController) parse(rawItems *[]string) {
 			name: itemName,
 			displayName: TitleCase(itemName, true),
 		}
-		go item.FetchData(false)
+		item.FetchData()
 	}
 }
