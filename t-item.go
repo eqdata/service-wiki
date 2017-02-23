@@ -29,6 +29,7 @@ import (
  */
 
 type Item struct {
+	id int64
 	name string
 	displayName string
 	imageSrc string
@@ -79,13 +80,14 @@ func (i *Item) fetchDataFromWiki(syncSave bool) {
 // sent back from the mongo store
 func (i *Item) fetchDataFromSQL() bool {
 	var (
+		id int64
 		name string
 		displayName string
 		statCode interface{}
 		statValue interface{}
 	)
 
-	query := "SELECT name, displayName, code AS statCode, value AS statValue " +
+	query := "SELECT items.id, name, displayName, code AS statCode, value AS statValue " +
 		"FROM items " +
 		"LEFT JOIN statistics " +
 		"ON items.id = statistics.item_id " +
@@ -96,7 +98,7 @@ func (i *Item) fetchDataFromSQL() bool {
 	if rows != nil {
 		hasStat := false
 		for rows.Next() {
-			err := rows.Scan(&name, &displayName, &statCode, &statValue)
+			err := rows.Scan(&id, &name, &displayName, &statCode, &statValue)
 			if err != nil {
 				fmt.Println("Scan error: ", err)
 			}
@@ -105,17 +107,20 @@ func (i *Item) fetchDataFromSQL() bool {
 			} else {
 				hasStat = true
 			}
-			LogInDebugMode("Row is: ", name, displayName, fmt.Sprint(statCode), fmt.Sprint(statValue))
+			if id > 0 {
+				i.id = id
+			}
+			//fmt.Println("Row is: ", fmt.Sprint(id), name, displayName, fmt.Sprint(statCode), fmt.Sprint(statValue))
 		}
 		if err := rows.Err(); err != nil {
 			fmt.Println("ROW ERROR: ", err.Error())
 		}
 		DB.CloseRows(rows)
 		return hasStat
+	} else {
+		fmt.Println("No record found for item: ", i.name)
+		return false
 	}
-
-	fmt.Println("No record found for item: ", i.name)
-	return false
 }
 
 // Extracts data from body
@@ -129,6 +134,7 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 
 		// Extract the item image - this assumes that the format is consistent (tested with 30 items thus far)
 		imageSrc := body[stringutil.CaseInsensitiveIndexOf(body, "/images"):stringutil.CaseInsensitiveIndexOf(body, "width")-2]
+
 		i.imageSrc = imageSrc
 
 		// Extract the item information snippet
@@ -141,35 +147,21 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 		for _, part := range upperParts {
 			part = strings.TrimSpace(part)
 
-			lowerParts := strings.Split(part, "  ")
-			if(len(lowerParts) > 1) {
-				for k :=0; k < len(lowerParts); k++ {
-					i.assignStatistic(strings.TrimSpace(lowerParts[k]))
+			fmt.Println("Matching against: ", part)
+			reg := regexp.MustCompile(`([A-Za-z:]+[ ]{0,}([+|-]?[ ]{0,}[0-9.]+|[A-Z ]+))`)
+			matches := reg.FindAllStringSubmatch(part, -1)
+			if len(matches) > 0 && !stringutil.CaseInsenstiveContains(part, "effect:") {
+				for _, match := range matches {
+					i.assignStatistic(strings.TrimSpace(match[0]))
 				}
 			} else {
+				// Race, class etc can be auto handled
 				i.assignStatistic(strings.TrimSpace(part))
 			}
 		}
 
-		LogInDebugMode("Item is: ", i)
-		if syncSave {
-			i.Save()
-		} else {
-			go i.Save()
-		}
+		i.Save()
 	} else {
-		// Invalid page, lets delete item if it is invalid
-		fmt.Println("No item data for this page")
-
-		// Delete the item from SQL
-		fmt.Println("DELETING ITEM: ", i.name)
-		deleteQuery := "DELETE FROM items WHERE name = ? OR displayName = ?"
-		rows, _ := DB.Query(deleteQuery, i.name, i.name)
-		if rows != nil {
-			fmt.Println("Deleted item successfully")
-			DB.CloseRows(rows)
-		}
-
 		// Check if its a spell page
 		reg := regexp.MustCompile("(?i)(magician|necromancer|paladin|warrior|druid|enchanter|cleric|shadowknight|monk|shaman|wizard|bard|rogue|ranger)")
 		classMatches := reg.FindStringSubmatch(body)
@@ -206,15 +198,27 @@ func (i *Item) extractItemDataFromHttpResponse(body string, syncSave bool) {
 
 				fmt.Println("Saving item: ", i)
 
-				query := "INSERT IGNORE INTO items (name, displayName, imageSrc) VALUES (?, ?, ?)"
-				id, err := DB.Insert(query, TitleCase(i.name, false), TitleCase(i.displayName, true), i.imageSrc)
-				if err != nil {
-					fmt.Println(err.Error())
-				} else if id == 0 {
-					fmt.Println("Item already exists")
-				} else if id > 0 {
-					fmt.Println("Successfully created item: " + i.name + " with id: ", id)
-					i.saveStats(id)
+				query := "SELECT id FROM items WHERE displayName = ? OR name = ?"
+				rows, _ := DB.Query(query, i.name, i.name)
+				if rows != nil {
+					var spellId int64
+
+					exists := false
+					for rows.Next() {
+						exists = true
+						err := rows.Scan(&spellId)
+						if err != nil {
+							fmt.Println("Scan error: ", err)
+						}
+						LogInDebugMode("Got effect id: ", fmt.Sprint(spellId))
+					}
+					if err := rows.Err(); err != nil {
+						fmt.Println("ROW ERROR: ", err.Error())
+					}
+					DB.CloseRows(rows)
+					if exists && spellId > 0 {
+						i.saveStats(spellId)
+					}
 				}
 			} else {
 				fmt.Println("Conversion error: ", err.Error())
@@ -231,7 +235,11 @@ func (i *Item) assignStatistic(part string) {
 	var stat Statistic
 
 	LogInDebugMode("Assigning part: ", part)
-	if stringutil.CaseInsenstiveContains(part, "nodrop", "quest item", "lore item", "magic item", "temporary", "no drop", "no rent", "no trade", "norent", "notrade", "expendable") {
+	if stringutil.CaseInsenstiveContains(part, "size capacity:") {
+		parts := strings.Split(part, ":")
+		stat.code = "size capacity"
+		stat.effect = parts[1]
+	} else if stringutil.CaseInsenstiveContains(part, "nodrop", "quest item", "lore item", "magic item", "temporary", "no drop", "no rent", "no trade", "norent", "notrade", "expendable") {
 		stat.code = "AFFINITY"
 		stat.effect = strings.ToUpper(part)
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
@@ -240,7 +248,7 @@ func (i *Item) assignStatistic(part string) {
 		stat.code = strings.ToUpper(strings.TrimSpace(parts[0]))
 		stat.effect = strings.ToUpper(strings.TrimSpace(parts[1]))
 		stat.value = sql.NullFloat64{Float64: 0, Valid: false}
-	} else if stringutil.CaseInsenstiveContains(part, "sv fire:", "sv cold:", "sv poison:", "sv magic:", "sv disease:", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:", "haste:", "instrument:", "instruments:", "range:", "charges:") {
+	} else if stringutil.CaseInsenstiveContains(part, "sv fire:", "sv cold:", "sv poison:", "sv magic:", "sv disease:", "dmg:", "ac:", "hp:", "dex:", "agi:", "sta:", "str:", "mana:", "cha:", "atk:", "wis:", "int:", "endr:", "wt:", "atk delay:", "haste:", "instrument:", "instruments:", "range:", "charges:", "weight reduction:", "capacity:") {
 		parts := strings.Split(part, ":")
 
 		isPositiveNumber := true
@@ -250,13 +258,15 @@ func (i *Item) assignStatistic(part string) {
 		} else if stringutil.CaseInsensitiveIndexOf(parts[1], "-") > -1 {
 			parts[1] = strings.TrimSpace(strings.Replace(parts[1], "-", "", -1))
 			isPositiveNumber = false
+		} else if stringutil.CaseInsensitiveIndexOf(parts[1], "%") > -1 {
+			parts[1] = strings.TrimSpace(strings.Replace(parts[1], "%", "", -1))
 		}
 
 		stat.code = strings.ToUpper(strings.TrimSpace(parts[0]))
 		val, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
 
 		if err != nil {
-			fmt.Println("Stat error: ", err)
+			fmt.Println("Stat error for item " + i.name + ": ", err)
 		} else {
 			stat.value = sql.NullFloat64{Float64:val, Valid: true}
 			if !isPositiveNumber {
@@ -300,50 +310,12 @@ func (i *Item) assignStatistic(part string) {
 	}
 }
 
-// Saves the item to our SQL database
 func (i *Item) Save() {
-	query := "UPDATE items SET name = ?, displayName = ?, imageSrc = ? WHERE name = ? AND displayName = ?"
-	rows, err := DB.Query(query, i.name, i.displayName, i.imageSrc, i.name, i.displayName)
-	if err != nil {
-		fmt.Println(err.Error())
-	}
-	if rows != nil {
-		DB.CloseRows(rows)
-	}
-	query = "SELECT id FROM items WHERE name = ? OR displayName = ?"
-	rows, err = DB.Query(query, i.name, i.name)
+	query := "UPDATE items SET imageSrc = ? WHERE name = ? OR displayName = ?"
+	_, err := DB.Query(query, i.imageSrc, i.name, i.name)
 	if err == nil {
-		if rows != nil {
-			var id int64
-
-			for rows.Next() {
-				err := rows.Scan(&id)
-				if err != nil {
-					fmt.Println("Scan error: ", err)
-				}
-				LogInDebugMode("Got id: ", fmt.Sprint(id))
-				i.saveStats(id)
-				i.saveEffects(id)
-			}
-			if err = rows.Err(); err != nil {
-				fmt.Println("ROW ERROR: ", err.Error())
-			}
-			DB.CloseRows(rows)
-
-			if id == 0 {
-				fmt.Println("We never found anything")
-				query := "INSERT INTO items (name, displayName, imageSrc) VALUES (?, ?, ?)"
-				id, err := DB.Insert(query, i.name, i.displayName, i.imageSrc)
-				if err == nil && id > 0 {
-					fmt.Println("Inserted with id: ", fmt.Sprint(id))
-					LogInDebugMode("Got id: ", fmt.Sprint(id))
-					i.saveStats(id)
-					i.saveEffects(id)
-				}
-			}
-		}
-	} else {
-		fmt.Println("Failed to insert stats for this item: ", err.Error())
+		i.saveEffects(i.id)
+		i.saveStats(i.id)
 	}
 }
 
