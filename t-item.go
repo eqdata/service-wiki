@@ -136,9 +136,6 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 	levelMatches := reg.FindAllStringSubmatch(body, -1)
 
 	// If we did accidentally get a spell page, then we want to parse it here
-	fmt.Println("Checking if we found a spell")
-	fmt.Println(classMatches)
-	fmt.Println(levelMatches)
 	if len(classMatches) > 0 && len(levelMatches) > 0 {
 		fmt.Println("Ack we found a spell")
 		i.extractSpellDataFromHttpBody(body)
@@ -229,10 +226,6 @@ func (i *Item) extractSpellDataFromHttpBody(body string) {
 			classes = strings.Replace(strings.ToLower(classes), "monk", "MNK", -1)
 			classes = strings.Replace(strings.ToLower(classes), "wizard", "WIZ", -1)
 			classes = strings.Replace(strings.ToLower(classes), "shaman", "SHM", -1)
-
-			if stringutil.CaseInsenstiveContains(classes, "brd") {
-				i.name = strings.Replace(i.name, "Spell:", "Song:", 1)
-			}
 
 			var stats []Statistic
 			var stat Statistic
