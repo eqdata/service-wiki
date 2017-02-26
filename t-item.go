@@ -48,7 +48,21 @@ func (i *Item) FetchData() {
 	if(i.fetchDataFromSQL()) {
 		fmt.Println("Exists in SQL")
 	} else {
-		i.fetchDataFromWiki()
+		if stringutil.CaseInsenstiveContains("spell:") {
+			i.fetchDataFromWiki()
+		} else {
+			i.displayName = "Spell:_" + i.displayName
+			i.name = "Spell: " + i.name
+			// Check that this wasn't actually a spell that existed if Spell: was omitted,
+			// otherwise this will permanently hit the Wiki
+			if(!i.fetchDataFromSQL()) {
+				i.displayName = strings.Replace(i.displayName, "Spell:_", "", 1)
+				i.name = strings.Replace(i.name, "Spell: ", "", 1)
+				i.fetchDataFromWiki()
+			} else {
+				fmt.Println("Exists in SQL")
+			}
+		}
 	}
 }
 
