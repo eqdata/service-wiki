@@ -71,6 +71,10 @@ func (i *Item) fetchDataFromWiki() {
 
 	uriString := TitleCase(strings.TrimSpace(strings.Replace(strings.ToLower(i.name), "spell:", "", -1)), true)
 
+	if uriString == "Silken_Cat-Fur_Girdle" {
+		uriString = "Silken_Cat-fur_Girdle"
+	}
+
 	fmt.Println("Requesting data from: ", WIKI_BASE_URL + "/" + uriString)
 
 	resp, err := http.Get(WIKI_BASE_URL + "/" + uriString)
@@ -210,7 +214,7 @@ func (i *Item) extractSpellDataFromHttpBody(body string) {
 
 		fmt.Println(levelMatches)
 		if len(classMatches) > 0 && len(levelMatches) > 0 {
-			srcMatches := regexp.MustCompile("(?i)/images/(.*?) ?\"").FindStringSubmatch(body)
+			srcMatches := regexp.MustCompile("(?i)(/images/.*?) ?\"").FindStringSubmatch(body)
 			if len(srcMatches) > 0 {
 				i.imageSrc = strings.TrimSpace(srcMatches[1])
 			}
