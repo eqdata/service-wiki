@@ -55,7 +55,7 @@ func (i *Item) FetchData() {
 // Data didn't exist on our server, so we hit the wiki here
 func (i *Item) fetchDataFromWiki() {
 
-	uriString := TitleCase(i.name, true)
+	uriString := TitleCase(strings.TrimSpace(strings.Replace(strings.ToLower(i.name), "spell:", "", -1)), true)
 
 	fmt.Println("Requesting data from: ", WIKI_BASE_URL + "/" + uriString)
 
@@ -71,6 +71,8 @@ func (i *Item) fetchDataFromWiki() {
 
 	if !stringutil.CaseInsenstiveContains(i.name, "spell:") && !stringutil.CaseInsenstiveContains(i.displayName, "spell:") {
 		i.extractItemDataFromHttpResponse(string(body))
+	} else {
+		i.extractSpellDataFromHttpBody(string(body))
 	}
 }
 
@@ -127,7 +129,20 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 	itemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itemData")
 	endOfItemDataIndex := stringutil.CaseInsensitiveIndexOf(body, "itembotbg")
 
-	if(itemDataIndex > -1 && endOfItemDataIndex > -1) {
+	// check if we got a spell page by accident:
+	reg := regexp.MustCompile("(?i)>(magician|necromancer|paladin|warrior|druid|enchanter|cleric|shadowknight|monk|shaman|wizard|bard|rogue|ranger)<")
+	classMatches := reg.FindAllStringSubmatch(body, -1)
+	reg = regexp.MustCompile("(?i)level[ \n]+([0-9]+)") // account for any poor formatting
+	levelMatches := reg.FindAllStringSubmatch(body, -1)
+
+	// If we did accidentally get a spell page, then we want to parse it here
+	fmt.Println("Checking if we found a spell")
+	fmt.Println(classMatches)
+	fmt.Println(levelMatches)
+	if len(classMatches) > 0 && len(levelMatches) > 0 {
+		fmt.Println("Ack we found a spell")
+		i.extractSpellDataFromHttpBody(body)
+	} else if(itemDataIndex > -1 && endOfItemDataIndex > -1) {
 
 		body = body[itemDataIndex:endOfItemDataIndex]
 
@@ -160,68 +175,67 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 		}
 
 		i.Save()
-	} else {
-		// Check if its a spell page
-		reg := regexp.MustCompile("(?i)(magician|necromancer|paladin|warrior|druid|enchanter|cleric|shadowknight|monk|shaman|wizard|bard|rogue|ranger)")
-		classMatches := reg.FindStringSubmatch(body)
-		reg = regexp.MustCompile("(?i)(level[ \n]+[0-9]+)") // account for any poor formatting
-		levelMatches := reg.FindStringSubmatch(body)
+	}
+}
 
+// IMPROVE THIS!
+func (i *Item) extractSpellDataFromHttpBody(body string) {
+
+	// If an item is sent with: Dead Men Floating then we can't be sure its a spell so we force it
+	// here to get the id
+	if i.id <= 0 {
+		i.name = "Spell: " + i.name
+		i.fetchDataFromSQL()
+	}
+
+	if i.id > 0 {
+		// Check if its a spell page
+		reg := regexp.MustCompile("(?i)>(magician|necromancer|paladin|warrior|druid|enchanter|cleric|shadowknight|monk|shaman|wizard|bard|rogue|ranger)<")
+		classMatches := reg.FindAllStringSubmatch(body, -1)
+		reg = regexp.MustCompile("(?i)level[ \n]+([0-9]+)") // account for any poor formatting
+		levelMatches := reg.FindAllStringSubmatch(body, -1)
+
+		fmt.Println(levelMatches)
 		if len(classMatches) > 0 && len(levelMatches) > 0 {
 			srcMatches := regexp.MustCompile("(?i)(/images/)((.*?)+ ?\")").FindStringSubmatch(body)
 			if len(srcMatches) > 0 {
 				i.imageSrc = strings.TrimSpace(srcMatches[0])
 			}
+			fmt.Println(srcMatches)
 
-			class := classMatches[0]
-			level := strings.TrimSpace(regexp.MustCompile("[0-9]+").FindStringSubmatch(levelMatches[0])[0])
+			var classes string
+			for idx, match := range classMatches {
+				classes += match[1] // dont get the full match
+				if idx < len(levelMatches) {
+					classes += (" (" + levelMatches[idx][1] + "),") // Get the first index to ignore the full match
+				} else {
+					classes += ", "
+				}
+			}
+
+			classes = strings.Replace(strings.ToLower(classes), "bard", "BRD", -1)
+			classes = strings.Replace(strings.ToLower(classes), "cleric", "CLR", -1)
+			classes = strings.Replace(strings.ToLower(classes), "enchanter", "ENC", -1)
+			classes = strings.Replace(strings.ToLower(classes), "shadowknight", "SHD", -1)
+			classes = strings.Replace(strings.ToLower(classes), "paladin", "PAL", -1)
+			classes = strings.Replace(strings.ToLower(classes), "magician", "MAG", -1)
+			classes = strings.Replace(strings.ToLower(classes), "necromancer", "NEC", -1)
+			classes = strings.Replace(strings.ToLower(classes), "warrior", "WAR", -1)
+			classes = strings.Replace(strings.ToLower(classes), "rogue", "ROG", -1)
+			classes = strings.Replace(strings.ToLower(classes), "ranger", "RNG", -1)
+			classes = strings.Replace(strings.ToLower(classes), "druid", "DRU", -1)
+			classes = strings.Replace(strings.ToLower(classes), "monk", "MNK", -1)
+			classes = strings.Replace(strings.ToLower(classes), "wizard", "WIZ", -1)
+			classes = strings.Replace(strings.ToLower(classes), "shaman", "SHM", -1)
 
 			var stats []Statistic
 			var stat Statistic
 			stat.code = "CLASS"
-			stat.effect = class
+			stat.effect = strings.TrimSpace(strings.ToUpper(classes))
 
 			stats = append(stats, stat)
-
-			stat.code = "LEVEL"
-			lvl, err := strconv.ParseFloat(level, 64)
-
-			if err == nil {
-				stat.value = sql.NullFloat64{Float64: float64(lvl), Valid: true}
-				stat.effect = ""
-
-				stats = append(stats, stat)
-
-				i.name = "Spell: " + i.name
-				i.statistics = stats
-
-				query := "SELECT id FROM items WHERE displayName = ? OR name = ?"
-				rows, _ := DB.Query(query, i.name, i.name)
-				if rows != nil {
-					var spellId int64
-
-					exists := false
-					for rows.Next() {
-						exists = true
-						err := rows.Scan(&spellId)
-						if err != nil {
-							fmt.Println("Scan error: ", err)
-						}
-						LogInDebugMode("Got effect id: ", fmt.Sprint(spellId))
-					}
-					if err := rows.Err(); err != nil {
-						fmt.Println("ROW ERROR: ", err.Error())
-					}
-					DB.CloseRows(rows)
-					if exists && spellId > 0 {
-						i.saveStats(spellId)
-					}
-				} else {
-					DB.CloseRows(rows)
-				}
-			} else {
-				fmt.Println("Conversion error: ", err.Error())
-			}
+			i.statistics = stats
+			i.Save()
 		}
 	}
 }
