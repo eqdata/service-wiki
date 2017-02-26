@@ -46,7 +46,7 @@ func (i *Item) FetchData() {
 	i.displayName = TitleCase(i.name, true)
 
 	if(i.fetchDataFromSQL()) {
-		//fmt.Println("Exists in SQL")
+		fmt.Println("Exists in SQL")
 	} else {
 		i.fetchDataFromWiki()
 	}
@@ -69,7 +69,7 @@ func (i *Item) fetchDataFromWiki() {
 		fmt.Println("ERROR EXTRACTING BODY FROM RESPONSE: ", err)
 	}
 
-	if !stringutil.CaseInsenstiveContains(i.name, "spell:") && !stringutil.CaseInsenstiveContains(i.displayName, "spell:") {
+	if !stringutil.CaseInsenstiveContains(i.name, "spell:", "song:") && !stringutil.CaseInsenstiveContains(i.displayName, "spell:", "song:") {
 		i.extractItemDataFromHttpResponse(string(body))
 	} else {
 		i.extractSpellDataFromHttpBody(string(body))
@@ -174,6 +174,8 @@ func (i *Item) extractItemDataFromHttpResponse(body string) {
 			}
 		}
 
+		fmt.Println(i.statistics)
+		fmt.Println(i.effects)
 		i.Save()
 	}
 }
@@ -197,9 +199,9 @@ func (i *Item) extractSpellDataFromHttpBody(body string) {
 
 		fmt.Println(levelMatches)
 		if len(classMatches) > 0 && len(levelMatches) > 0 {
-			srcMatches := regexp.MustCompile("(?i)(/images/)((.*?)+ ?\")").FindStringSubmatch(body)
+			srcMatches := regexp.MustCompile("(?i)/images/(.*?) ?\"").FindStringSubmatch(body)
 			if len(srcMatches) > 0 {
-				i.imageSrc = strings.TrimSpace(srcMatches[0])
+				i.imageSrc = strings.TrimSpace(srcMatches[1])
 			}
 			fmt.Println(srcMatches)
 
@@ -227,6 +229,10 @@ func (i *Item) extractSpellDataFromHttpBody(body string) {
 			classes = strings.Replace(strings.ToLower(classes), "monk", "MNK", -1)
 			classes = strings.Replace(strings.ToLower(classes), "wizard", "WIZ", -1)
 			classes = strings.Replace(strings.ToLower(classes), "shaman", "SHM", -1)
+
+			if stringutil.CaseInsenstiveContains(classes, "brd") {
+				i.name = strings.Replace(i.name, "Spell:", "Song:", 1)
+			}
 
 			var stats []Statistic
 			var stat Statistic
